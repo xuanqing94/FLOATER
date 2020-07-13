@@ -11,8 +11,8 @@ import torch.nn.functional as F
 from fairseq import utils
 
 
-class MultiheadAttention(nn.Module):
-    """Multi-headed attention.
+class SketchedAttention(nn.Module):
+    """Sketched attention.
 
     See "Attention Is All You Need" for more details.
     """
@@ -65,10 +65,14 @@ class MultiheadAttention(nn.Module):
         self.onnx_trace = False
 
         self.enable_torch_version = False
+        # Disable torch version forever
+        """
         if hasattr(F, "multi_head_attention_forward"):
             self.enable_torch_version = True
         else:
             self.enable_torch_version = False
+        """
+        self.sketch_dim = 8
 
     def prepare_for_onnx_export_(self):
         self.onnx_trace = True
@@ -124,29 +128,6 @@ class MultiheadAttention(nn.Module):
         tgt_len, bsz, embed_dim = query.size()
         assert embed_dim == self.embed_dim
         assert list(query.size()) == [tgt_len, bsz, embed_dim]
-
-        if self.enable_torch_version and not self.onnx_trace and incremental_state is None and not static_kv:
-            if self.qkv_same_dim:
-                return F.multi_head_attention_forward(query, key, value,
-                                                      self.embed_dim, self.num_heads,
-                                                      self.in_proj_weight,
-                                                      self.in_proj_bias, self.bias_k, self.bias_v,
-                                                      self.add_zero_attn, self.dropout,
-                                                      self.out_proj.weight, self.out_proj.bias,
-                                                      self.training, key_padding_mask, need_weights,
-                                                      attn_mask)
-            else:
-                return F.multi_head_attention_forward(query, key, value,
-                                                      self.embed_dim, self.num_heads,
-                                                      torch.empty([0]),
-                                                      self.in_proj_bias, self.bias_k, self.bias_v,
-                                                      self.add_zero_attn, self.dropout,
-                                                      self.out_proj.weight, self.out_proj.bias,
-                                                      self.training, key_padding_mask, need_weights,
-                                                      attn_mask, use_separate_proj_weight=True,
-                                                      q_proj_weight=self.q_proj_weight,
-                                                      k_proj_weight=self.k_proj_weight,
-                                                      v_proj_weight=self.v_proj_weight)
 
         if incremental_state is not None:
             saved_state = self._get_input_buffer(incremental_state)
@@ -239,11 +220,20 @@ class MultiheadAttention(nn.Module):
             if key_padding_mask is not None:
                 key_padding_mask = torch.cat(
                     [key_padding_mask, torch.zeros(key_padding_mask.size(0), 1).type_as(key_padding_mask)], dim=1)
+        
+        # TODO randomly sample a sketching matrix (don't have to share the same random seed for each process)
+        # i.e. it is ok to have different random matrices for each process
+        # k/v [B*H, L, D] --> [B*L, s, D]
+        S = torch.randn(self.s, src_len).to(k) / math.sqrt(src_len)
+        Sk = torch.einsum('sl,bld->bsd', S, k)
+        Sv = torch.einsum('sl,bld->bsd', S, v)
 
-        attn_weights = torch.bmm(q, k.transpose(1, 2))
+        attn_weights = torch.bmm(q, Sk.transpose(1, 2))
+        
+        # this line does nothing?
         attn_weights = self.apply_sparse_mask(attn_weights, tgt_len, src_len, bsz)
 
-        assert list(attn_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
+        assert list(attn_weights.size()) == [bsz * self.num_heads, tgt_len, self.s]
 
         if attn_mask is not None:
             attn_mask = attn_mask.unsqueeze(0)
