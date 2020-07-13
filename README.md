@@ -1,6 +1,6 @@
 # FLOATER
 *This is the official implementation of *Learning to encode position for transformer with continuous dynamical model* in ICML 2020*
-The codebase is modified upon (fairseq)[].
+The codebase is modified upon [fairseq](https://github.com/pytorch/fairseq).
 
 ## Install the dependencies
 In what follows I assume PyTorch(>=1.3) is installed.
