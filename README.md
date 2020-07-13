@@ -88,5 +88,5 @@ python scripts/average_checkpoints.py \
        --path checkpoints/${folder}/averaged.pt \
        --beam 4 --batch-size 64 --remove-bpe  --lenpen 0.6 > tmp_out
 
-bash compound_split_bleu.sh tmp_out
+bash scripts/compound_split_bleu.sh tmp_out
 ```
