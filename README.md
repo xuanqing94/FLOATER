@@ -38,7 +38,7 @@ fairseq-preprocess \
 # Binarize En-Fr similarly.
 ```
 
-Then, you can choose to train FLOATER from scratch but it will take a pretty long time until convergence. So, I recommend to follow the pretraining and finetuning approach discussed in the paper:
+You can choose to train FLOATER from scratch but it will take a pretty long time until convergence. So, I recommend to follow the pretraining and finetuning approach discussed in the paper:
 ```
 # Pretraining
 fairseq-train \
@@ -54,8 +54,7 @@ fairseq-train \
     --find-unused-parameters \
     --update-freq 2 \
     --reset-optimizer \
-    --save-interval-updates 5 \
-    --max-update 8 \
+    --max-epoch 30 \
 
 # initialize checkpoint_last.pt with original transformer model
 python model_migration.py
@@ -73,7 +72,21 @@ fairseq-train \
     --warmup-init-lr 1.0e-7 --warmup-updates 4000 \
     --find-unused-parameters \
     --update-freq 2 \
+    --save-interval-updates 2000 \
     --reset-optimizer \
     --max-epoch 10 \
 
+# evaluate on test set
+folder=base-flow
+nckpt=5
+python scripts/average_checkpoints.py \
+    --inputs ./checkpoints/${folder}/ \
+    --output ./checkpoints/${folder}/averaged.pt \
+    --num-update-checkpoints ${nckpt} \
+
+ fairseq-generate data-bin/tokenized.en-de \
+       --path checkpoints/${folder}/averaged.pt \
+       --beam 4 --batch-size 64 --remove-bpe  --lenpen 0.6 > tmp_out
+
+bash compound_split_bleu.sh tmp_out
 ```
