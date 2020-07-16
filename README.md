@@ -14,7 +14,7 @@ git clone https://github.com/xuanqing94/FLOATER.git
 cd FLOATER
 pip install -e .
 ```
-
+*NOTE* Do not install the official [torchdiffeq](https://github.com/rtqichen/torchdiffeq), I made several fixes to work with FLOATER.
 
 ## Run WMT14 En-De and En-Fr
 First, download and preprocess the dataset:
