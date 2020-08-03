@@ -7,7 +7,7 @@ Original license: MIT
 
 from functools import lru_cache
 import json
-
+import re
 
 @lru_cache()
 def bytes_to_unicode():
@@ -102,6 +102,29 @@ class Encoder:
         word = ' '.join(word)
         self.cache[token] = word
         return word
+    
+    def tokenize(self, text, add_prefix_space=False):
+        """Tokenize a string, modified from HuggingFace's Transformers.
+        Args:
+            text: the text string to be tokenized.
+            add_prefix_space: if set, adds an extra space at the beginning.
+        """
+        if add_prefix_space:
+            text = ' ' + text
+        bpe_tokens = []
+        for token in self.re.findall(self.pat, text):
+            token = ''.join(self.byte_encoder[b] for b in token.encode('utf-8'))
+            bpe_tokens.extend(bpe_token for bpe_token in self.bpe(token).split(" ")) 
+        return bpe_tokens
+    
+    def convert_token_to_id(self, token):
+        return self.encoder[token]
+    
+    def convert_tokens_to_ids(self, tokens):
+        return [self.encoder[token] for token in tokens]
+
+    def convert_id_to_token(self, index):
+        return self.decoder[index]
 
     def encode(self, text):
         bpe_tokens = []

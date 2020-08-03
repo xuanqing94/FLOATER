@@ -20,13 +20,18 @@ from .linearized_convolution import LinearizedConvolution
 from .logsumexp_moe import LogSumExpMoE
 from .mean_pool_gating_network import MeanPoolGatingNetwork
 from .multihead_attention import MultiheadAttention
+from .flow_attention import FlowAttention
 from .positional_embedding import PositionalEmbedding
+from .flow_funcs import flow_func, flow_func_big, flow_func_linear, id_flow
 from .scalar_bias import ScalarBias
 from .sinusoidal_positional_embedding import SinusoidalPositionalEmbedding
 from .transformer_sentence_encoder_layer import TransformerSentenceEncoderLayer
+from .flow_transformer_sentence_encoder_layer import FlowTransformerSentenceEncoderLayer
 from .transformer_sentence_encoder import TransformerSentenceEncoder
+from .flow_transformer_sentence_encoder import FlowTransformerSentenceEncoder
 from .unfold import unfold1d
 from .transformer_layer import TransformerDecoderLayer, TransformerEncoderLayer
+from .flow_transformer_layer import FlowTransformerDecoderLayer, FlowTransformerEncoderLayer
 from .vggblock import VGGBlock
 
 __all__ = [

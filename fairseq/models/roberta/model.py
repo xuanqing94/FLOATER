@@ -5,7 +5,7 @@
 """
 RoBERTa: A Robustly Optimized BERT Pretraining Approach.
 """
-
+import pdb
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -20,6 +20,7 @@ from fairseq.models import (
 from fairseq.modules import (
     LayerNorm,
     TransformerSentenceEncoder,
+    FlowTransformerSentenceEncoder,
 )
 from fairseq.modules.transformer_sentence_encoder import init_bert_params
 
@@ -46,7 +47,25 @@ class RobertaModel(FairseqLanguageModel):
         self.apply(init_bert_params)
 
         self.classification_heads = nn.ModuleDict()
+        if hasattr(args, "freeze_body") and args.freeze_body:
+            self.freeze_body()
+        if hasattr(args, "freeze_flow") and args.freeze_flow:
+            self.freeze_flow()
 
+    def freeze_body(self):
+        for name, param in self.named_parameters():
+            if "proj_flow" not in name:
+                param.requires_grad = False
+            else:
+                param.requires_grad = True
+
+    def freeze_flow(self):
+        for name, param in self.named_parameters():
+            if "proj_flow" in name:
+                param.requires_grad = False
+            else:
+                param.requires_grad = True
+    
     @staticmethod
     def add_args(parser):
         """Add model-specific arguments to the parser."""
@@ -83,6 +102,9 @@ class RobertaModel(FairseqLanguageModel):
                             help='LayerDrop probability for encoder')
         parser.add_argument('--encoder-layers-to-keep', default=None,
                             help='which layers to *keep* when pruning as a comma-separated list')
+        parser.add_argument('--use-flow-model', action='store_true', help='Whether to use the flow-based model or not')
+        parser.add_argument('--freeze-body', action='store_true', help="Whether to freeze the body part or not")
+        parser.add_argument('--freeze-flow', action='store_true', help='Whether to freeze the flow part or not')
 
     @classmethod
     def build_model(cls, args, task):
@@ -93,14 +115,13 @@ class RobertaModel(FairseqLanguageModel):
 
         if not hasattr(args, 'max_positions'):
             args.max_positions = args.tokens_per_sample
-
         encoder = RobertaEncoder(args, task.source_dictionary)
         return cls(args, encoder)
 
     def forward(self, src_tokens, features_only=False, return_all_hiddens=False, classification_head_name=None, **kwargs):
         if classification_head_name is not None:
             features_only = True
-
+        
         x, extra = self.decoder(src_tokens, features_only, return_all_hiddens, **kwargs)
 
         if classification_head_name is not None:
@@ -307,8 +328,11 @@ class RobertaEncoder(FairseqDecoder):
             args.encoder_layers = len(args.encoder_layers_to_keep.split(","))
             args.decoder_layers_to_keep = args.encoder_layers_to_keep
             args.encoder_layers_to_keep = None
-
-        self.sentence_encoder = TransformerSentenceEncoder(
+        if hasattr(args, "use_flow_model") and args.use_flow_model:
+            Encoder = FlowTransformerSentenceEncoder
+        else:
+            Encoder = TransformerSentenceEncoder
+        self.sentence_encoder = Encoder(
             padding_idx=dictionary.pad(),
             vocab_size=len(dictionary),
             num_encoder_layers=args.encoder_layers,

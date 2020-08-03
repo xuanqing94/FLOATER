@@ -10,12 +10,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from fairseq.modules import (
     LayerNorm,
-    MultiheadAttention,
     PositionalEmbedding,
-    TransformerSentenceEncoderLayer,
+    FlowTransformerSentenceEncoderLayer,
+    FlowAttention,
+    flow_func_linear,
 )
 import random
-
+#from torchdiffeq import odeint_adjoint as odeint
+from torchdiffeq import odeint
 
 def init_bert_params(module):
     """
@@ -39,13 +41,13 @@ def init_bert_params(module):
         module.weight.data.normal_(mean=0.0, std=0.02)
         if module.padding_idx is not None:
             module.weight.data[module.padding_idx].zero_()
-    if isinstance(module, MultiheadAttention):
+    if isinstance(module, FlowAttention):
         module.q_proj.weight.data.normal_(mean=0.0, std=0.02)
         module.k_proj.weight.data.normal_(mean=0.0, std=0.02)
         module.v_proj.weight.data.normal_(mean=0.0, std=0.02)
 
 
-class TransformerSentenceEncoder(nn.Module):
+class FlowTransformerSentenceEncoder(nn.Module):
     """
     Implementation for a Bi-directional Transformer based Sentence Encoder used
     in BERT/XLM style pre-trained models.
@@ -132,10 +134,23 @@ class TransformerSentenceEncoder(nn.Module):
             if self.use_position_embeddings
             else None
         )
-
+        ## Parameters for flow-transformer
+        self.proj_bias = nn.Parameter(torch.randn(3, num_encoder_layers, self.embedding_dim))
+        self.register_buffer("time_dt", torch.tensor(0.01))
+        self.register_buffer("update_flow_every", torch.tensor(400))
+        self.register_buffer("k_updates", torch.tensor(0))
+        self.register_buffer("cached_bias", 
+                             torch.randn(max_seq_len, 3, num_encoder_layers, self.embedding_dim))
+        multiplier = 2
+        self.proj_flow = flow_func_linear(num_encoder_layers, multiplier, self.embedding_dim)
+        self.ode_args = {
+            "method": "midpoint",
+            "options": {"step_size": self.time_dt.item() / 5.0},
+        }
+        ##
         self.layers = nn.ModuleList(
             [
-                TransformerSentenceEncoderLayer(
+                FlowTransformerSentenceEncoderLayer(
                     embedding_dim=self.embedding_dim,
                     ffn_embedding_dim=ffn_embedding_dim,
                     num_attention_heads=num_attention_heads,
@@ -213,11 +228,25 @@ class TransformerSentenceEncoder(nn.Module):
         inner_states = []
         if not last_state_only:
             inner_states.append(x)
-        for layer in self.layers:
+        
+        # Pre-compute all proj weights in the time grids
+        tok_len = x.size(0)
+        assert self.max_seq_len >= tok_len, tok_len
+        if self.cached_bias is None or self.k_updates.item() % self.update_flow_every.item() == 0:
+            time_grid = torch.arange(0, self.max_seq_len).to(x) * self.time_dt
+            bias_vec = odeint(self.proj_flow, self.proj_bias, time_grid, **self.ode_args)
+            self.cached_bias = bias_vec
+            all_proj_bias = self.cached_bias[:tok_len]
+        else:
+            unused_bias = self.proj_flow(0, self.proj_bias).unsqueeze(0)
+            all_proj_bias = unused_bias * 0.0 + self.cached_bias[:tok_len].detach()
+        self.k_updates += 1
+        
+        for layer_id, layer in enumerate(self.layers):
             # add LayerDrop (see https://arxiv.org/abs/1909.11556 for description)
             dropout_probability = random.uniform(0, 1)
             if not self.training or (dropout_probability > self.layerdrop):
-                x, _ = layer(x, self_attn_padding_mask=padding_mask)
+                x, _ = layer(x, self_attn_padding_mask=padding_mask, proj_bias=all_proj_bias[:, :, layer_id, :])
                 if not last_state_only:
                     inner_states.append(x)
 
